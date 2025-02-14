@@ -229,6 +229,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	rtvHandles[1].ptr = rtvHandles[0].ptr + device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 	device->CreateRenderTargetView(swapChainResources[1], &rtvDesc, rtvHandles[1]);
 
+	// Fence
+	ID3D12Fence* fence = nullptr;
+	uint64_t fenceValue = 0;
+	hr = device->CreateFence(fenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
+	assert(SUCCEEDED(hr));
+
+	// Event
+	HANDLE fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+	assert(fenceEvent != nullptr);
+
 	// 出力ウィンドウへの文字出力
 	OutputDebugStringA("Hello DirectX!\n");
 	
@@ -247,9 +257,27 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
 			// これから書き込むバックバッファのインデックスを取得
 			UINT backBufferIndex = swapChain->GetCurrentBackBufferIndex();
+
+			// transhitionBarrierの設定
+			D3D12_RESOURCE_BARRIER barrier{};
+			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+			// barrierの張る対象
+			barrier.Transition.pResource = swapChainResources[backBufferIndex];
+			// 遷移前のResourceState
+			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+			// 遷移後のResourceState
+			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+			// TransitionBarrierを張る
+			commandList->ResourceBarrier(1, &barrier);
+
+			// RenderTragetの設定
 			commandList->OMSetRenderTargets(1, &rtvHandles[backBufferIndex], false, nullptr);
 			float clearColor[] = { 0.1f, 0.25f, 0.5f, 1.0f };
 			commandList->ClearRenderTargetView(rtvHandles[backBufferIndex], clearColor, 0, nullptr);
+			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+			commandList->ResourceBarrier(1, &barrier);
 			hr = commandList->Close();
 			assert(SUCCEEDED(hr));
 
@@ -257,6 +285,18 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			ID3D12CommandList* commandLists[] = { commandList };
 			commandQueue->ExecuteCommandLists(1, commandLists);
 			swapChain->Present(1, 0);
+			// fenceの値を更新
+			fenceValue++;
+			// signalを送る
+			commandQueue->Signal(fence, fenceValue);
+			// signalにたどり着いたかを確認
+			if (fence->GetCompletedValue() < fenceValue) {
+				// たどり着くまで待つように設定
+				fence->SetEventOnCompletion(fenceValue, fenceEvent);
+				// イベントを待つ
+				WaitForSingleObject(fenceEvent, INFINITE);
+			}
+
 			hr = commandAllocator->Reset();
 			assert(SUCCEEDED(hr));
 			hr = commandList->Reset(commandAllocator, nullptr);
