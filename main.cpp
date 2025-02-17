@@ -8,6 +8,8 @@
 #include <dxgidebug.h>
 #include <dxcapi.h>
 #include "Vector4.h"
+#include "Matrix4x4.h"
+#include "Transform.h"
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "dxguid.lib")
@@ -30,6 +32,13 @@ IDxcBlob* CompileShader(
 
 ID3D12Resource* CreateBufferResource(ID3D12Device* device, size_t sizeInBytes);
 
+Matrix4x4 MakeIdentityMatrix4x4();
+Matrix4x4 MakeAffineMatrix(Vector3 scale, Vector3 theta, Vector3 translate);
+Matrix4x4 Multiply(Matrix4x4 matrix1, Matrix4x4 matrix2);
+Matrix4x4 MakePerspectiveFovMatirx(float fovY, float aspectRaito, float nearClip, float farClip);
+Matrix4x4 Inverse(Matrix4x4 matrix);
+float Determinant3x3(Matrix4x4 matrix, int row, int col);
+
 // ウィンドウプロシージャ
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 	// メッセージに応じてゲーム固有の処理を行う
@@ -46,7 +55,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 
 // Windousアプリでのエントリーポイント(main関数)
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
-	
+
 	WNDCLASS wc{};
 	// ウィンドウプロシージャ
 	wc.lpfnWndProc = WindowProc;
@@ -271,10 +280,13 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	descriptionRootSignature.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
 	// RootParameterを作成(複数可)
-	D3D12_ROOT_PARAMETER rootParameters[1] = {};
+	D3D12_ROOT_PARAMETER rootParameters[2] = {};
 	rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
 	rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 	rootParameters[0].Descriptor.ShaderRegister = 0;
+	rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+	rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+	rootParameters[1].Descriptor.ShaderRegister = 0;
 	descriptionRootSignature.pParameters = rootParameters;
 	descriptionRootSignature.NumParameters = _countof(rootParameters);
 
@@ -392,6 +404,19 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	// 赤色を書き込む
 	*materialData = Vector4(1.0f, 0.0f, 0.0f, 1.0f);
 
+	// WVP用のリソース
+	ID3D12Resource* wvpResource = CreateBufferResource(device, sizeof(Matrix4x4));
+	// データを書き込む
+	Matrix4x4* wvpData = nullptr;
+	// 書き込むためのアドレスを取得
+	wvpResource->Map(0, nullptr, reinterpret_cast<void**>(&wvpData));
+	// 単位行列を書き込む
+	*wvpData = MakeIdentityMatrix4x4();
+
+	// Transformの変数
+	Transform transfrom{ {1.0f, 1.0f, 1.0f},{0.0f, 0.0f, 0.0f},{0.0f, 0.0f,0.0f} };
+	Transform camaraTransform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -5.0f} };
+
 	// ビューポート
 	D3D12_VIEWPORT viewport{};
 	viewport.Width = kClientWidth;
@@ -410,7 +435,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
 	// 出力ウィンドウへの文字出力
 	OutputDebugStringA("Hello DirectX!\n");
-	
+
 	// ウィンドウを表示
 	ShowWindow(hwnd, SW_SHOW);
 
@@ -423,6 +448,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			DispatchMessage(&msg);
 		} else {
 			// ゲームの処理
+
+			transfrom.rotate.y += 0.03f;
+			Matrix4x4 worldMatrix = MakeAffineMatrix(transfrom.scale, transfrom.rotate, transfrom.translate);
+			Matrix4x4 cameraMatrix = MakeAffineMatrix(camaraTransform.scale, camaraTransform.rotate, camaraTransform.translate);
+			Matrix4x4 viewMatrix = Inverse(cameraMatrix);
+			Matrix4x4 projectionMatrix = MakePerspectiveFovMatirx(0.45f, float(kClientWidth) / float(kClientHeight), 0.1f, 100.0f);
+			Matrix4x4 worldViewProjectionMatrix = Multiply(worldMatrix, Multiply(viewMatrix, projectionMatrix));
+			*wvpData = worldViewProjectionMatrix;
 
 			// これから書き込むバックバッファのインデックスを取得
 			UINT backBufferIndex = swapChain->GetCurrentBackBufferIndex();
@@ -454,8 +487,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			// マテリアルCBufferの場所を設定
 			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress());
+			commandList->SetGraphicsRootConstantBufferView(1, wvpResource->GetGPUVirtualAddress());
 			commandList->DrawInstanced(3, 1, 0, 0);
-			
+
 			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
 			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
 			commandList->ResourceBarrier(1, &barrier);
@@ -513,6 +547,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	pixelShaderBlob->Release();
 	vertexShaderBlob->Release();
 	materialResource->Release();
+	wvpResource->Release();
 	CloseWindow(hwnd);
 
 	// リソースチェック
@@ -655,4 +690,213 @@ ID3D12Resource* CreateBufferResource(ID3D12Device* device, size_t sizeInBytes) {
 	);
 	assert(SUCCEEDED(hr));
 	return BufferResource;
+}
+
+/// <summary>
+/// 4x4の単位行列の作成
+/// </summary>
+/// <returns>4x4の単位行列</returns>
+Matrix4x4 MakeIdentityMatrix4x4() {
+	Matrix4x4 identityMatrix;
+
+	identityMatrix.m[0][0] = 1.0f;
+	identityMatrix.m[0][1] = 0.0f;
+	identityMatrix.m[0][2] = 0.0f;
+	identityMatrix.m[0][3] = 0.0f;
+
+	identityMatrix.m[1][0] = 0.0f;
+	identityMatrix.m[1][1] = 1.0f;
+	identityMatrix.m[1][2] = 0.0f;
+	identityMatrix.m[1][3] = 0.0f;
+
+	identityMatrix.m[2][0] = 0.0f;
+	identityMatrix.m[2][1] = 0.0f;
+	identityMatrix.m[2][2] = 1.0f;
+	identityMatrix.m[2][3] = 0.0f;
+
+	identityMatrix.m[3][0] = 0.0f;
+	identityMatrix.m[3][1] = 0.0f;
+	identityMatrix.m[3][2] = 0.0f;
+	identityMatrix.m[3][3] = 1.0f;
+
+	return identityMatrix;
+}
+
+/// <summary>
+/// MakeAffineMatrix関数
+/// </summary>
+/// <param name="scale">拡縮</param>
+/// <param name="rotate">回転</param>
+/// <param name="translate">移動</param>
+/// <returns>4x4アフィン行列</returns>
+Matrix4x4 MakeAffineMatrix(Vector3 scale, Vector3 rotate, Vector3 translate) {
+	Matrix4x4 affineMatrix;
+
+	// 回転行列を作成（Euler角を使用）
+	float cosX = cosf(rotate.x);
+	float sinX = sinf(rotate.x);
+	float cosY = cosf(rotate.y);
+	float sinY = sinf(rotate.y);
+	float cosZ = cosf(rotate.z);
+	float sinZ = sinf(rotate.z);
+
+	// 回転行列（X軸回転）
+	Matrix4x4 rotateX = {
+		1.0f,  0.0f, 0.0f, 0.0f,
+		0.0f, cosX, sinX, 0.0f,
+		0.0f, -sinX,  cosX, 0.0f,
+		0.0f, 0.0f, 0.0f, 1.0f
+	};
+
+	// 回転行列（Y軸回転）
+	Matrix4x4 rotateY = {
+		cosY, 0.0f, -sinY, 0.0f,
+		0.0f, 1.0f, 0.0f, 0.0f,
+		sinY, 0.0f, cosY, 0.0f,
+		0.0f, 0.0f, 0.0f, 1.0f
+	};
+
+	// 回転行列（Z軸回転）
+	Matrix4x4 rotateZ = {
+		cosZ, sinZ, 0.0f, 0.0f,
+		-sinZ, cosZ, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		0.0f, 0.0f, 0.0f, 1.0f
+	};
+
+	// 回転行列を合成
+	Matrix4x4 rotationMatrix = Multiply(rotateX, Multiply(rotateY, rotateZ));
+
+	// スケーリング行列
+	Matrix4x4 scaleMatrix = {
+		scale.x, 0.0f, 0.0f, 0.0f,
+		0.0f, scale.y, 0.0f, 0.0f,
+		0.0f, 0.0f, scale.z, 0.0f,
+		0.0f, 0.0f, 0.0f, 1.0f
+	};
+
+	// 平行移動行列
+	Matrix4x4 translateMatrix = {
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		translate.x, translate.y, translate.z, 1.0f
+	};
+
+	affineMatrix = Multiply(translateMatrix, Multiply(scaleMatrix, rotationMatrix));
+
+	return affineMatrix;
+}
+
+/// <summary>
+/// 4x4行列の乗算
+/// </summary>
+/// <param name="matrix1">4x4行列 1</param>
+/// <param name="matrix2">4x4行列 2</param>
+/// <returns>4x4行列の乗算</returns>
+Matrix4x4 Multiply(Matrix4x4 matrix1, Matrix4x4 matrix2) {
+	Matrix4x4 multiplyMatrix;
+	float multiply[4];  // 4x4行列に合わせてサイズを変更
+
+	for (int row = 0; row < 4; row++) {
+		for (int column = 0; column < 4; column++) {
+			for (int i = 0; i < 4; i++) {
+				multiply[i] = matrix1.m[row][i] * matrix2.m[i][column];
+			}
+			multiplyMatrix.m[row][column] = multiply[0] + multiply[1] + multiply[2] + multiply[3];
+		}
+	}
+
+	return multiplyMatrix;
+}
+
+/// <summary>
+/// MakePerspectiveFovMatirx関数
+/// </summary>
+/// <param name="fovY">画角</param>
+/// <param name="aspectRaito">アスペクト比</param>
+/// <param name="nearClip">近平面への距離</param>
+/// <param name="farClip">遠平面への距離</param>
+/// <returns>透視射影行列</returns>
+Matrix4x4 MakePerspectiveFovMatirx(float fovY, float aspectRaito, float nearClip, float farClip) {
+	Matrix4x4 perspectiveFovMatirx;
+
+	perspectiveFovMatirx = {
+		1.0f / aspectRaito * (cosf(fovY / 2.0f) / sinf(fovY / 2.0f)), 0.0f, 0.0f, 0.0f,
+		0.0f, (cosf(fovY / 2.0f) / sinf(fovY / 2.0f)), 0.0f, 0.0f,
+		0.0f, 0.0f, farClip / farClip - nearClip, 1.0f,
+		0.0f, 0.0f, -nearClip * farClip / (farClip - nearClip), 0.0f
+	};
+
+	return perspectiveFovMatirx;
+}
+
+/// <summary>
+/// 4x4の逆行列の作成
+/// </summary>
+/// <param name="matrix">元の行列</param>
+/// <returns>逆行列</returns>
+Matrix4x4 Inverse(Matrix4x4 matrix) {
+	Matrix4x4 inverseMatrix;
+	float determinant;
+
+	// 4x4行列の行列式を計算
+	determinant = matrix.m[0][0] * Determinant3x3(matrix, 0, 0)
+		- matrix.m[0][1] * Determinant3x3(matrix, 0, 1)
+		+ matrix.m[0][2] * Determinant3x3(matrix, 0, 2)
+		- matrix.m[0][3] * Determinant3x3(matrix, 0, 3);
+
+	// 余因子行列を求める
+	Matrix4x4 cofactorMatrix;
+	for (int i = 0; i < 4; i++) {
+		for (int j = 0; j < 4; j++) {
+			cofactorMatrix.m[i][j] = ((i + j) % 2 == 0 ? 1 : -1) * Determinant3x3(matrix, i, j);
+		}
+	}
+
+	// 余因子行列の転置を求める（余因子行列の転置は共役行列に相当）
+	Matrix4x4 adjugateMatrix;
+	for (int i = 0; i < 4; i++) {
+		for (int j = 0; j < 4; j++) {
+			adjugateMatrix.m[i][j] = cofactorMatrix.m[j][i];
+		}
+	}
+
+	// 逆行列 = (1 / 行列式) * 共役行列
+	float invDet = 1.0f / determinant;
+	for (int i = 0; i < 4; i++) {
+		for (int j = 0; j < 4; j++) {
+			inverseMatrix.m[i][j] = adjugateMatrix.m[i][j] * invDet;
+		}
+	}
+
+	return inverseMatrix;
+}
+
+/// <summary>
+/// 3x3の行列式を計算する関数
+/// </summary>
+/// <param name="matrix">元の4x4行列</param>
+/// <param name="row">対象の行</param>
+/// <param name="col">対象の列</param>
+/// <returns>3x3行列の行列式</returns>
+float Determinant3x3(Matrix4x4 matrix, int row, int col) {
+	// 3x3の部分行列を取得
+	float m[3][3];
+	int mRow = 0;
+	for (int i = 0; i < 4; i++) {
+		if (i == row) continue;
+		int mCol = 0;
+		for (int j = 0; j < 4; j++) {
+			if (j == col) continue;
+			m[mRow][mCol] = matrix.m[i][j];
+			mCol++;
+		}
+		mRow++;
+	}
+
+	// 3x3の行列式を計算
+	return m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+		- m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+		+ m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
 }
