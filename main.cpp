@@ -46,6 +46,7 @@ Matrix4x4 MakeAffineMatrix(Vector3 scale, Vector3 theta, Vector3 translate);
 Matrix4x4 Multiply(Matrix4x4 matrix1, Matrix4x4 matrix2);
 Matrix4x4 MakePerspectiveFovMatirx(float fovY, float aspectRaito, float nearClip, float farClip);
 Matrix4x4 Inverse(Matrix4x4 matrix);
+Matrix4x4 MakeOrthographicMatrix(float left, float top, float right, float bottom, float nearClip, float farClip);
 float Determinant3x3(Matrix4x4 matrix, int row, int col);
 DirectX::ScratchImage LoadTexture(const std::string& filePath);
 void UploadTextureData(ID3D12Resource* texture, const DirectX::ScratchImage& mipImages);
@@ -445,7 +446,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	hr = device->CreateGraphicsPipelineState(&graphicsPipelineStateDesc, IID_PPV_ARGS(&graphicsPipelineState));
 	assert(SUCCEEDED(hr));
 
+	//===============================================
 	// vertexResourceを作成
+	//===============================================
 	ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(VertexData) * 6);
 
 	// 頂点バッファビューを作成
@@ -456,6 +459,29 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	vertexBufferView.SizeInBytes = sizeof(VertexData) * 6;
 	// 1頂点当たりのサイズ
 	vertexBufferView.StrideInBytes = sizeof(VertexData);
+	
+	// 頂点データ
+	VertexData* vertexData = nullptr;
+	// アドレスを取得
+	vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
+	// 左下
+	vertexData[0].position = { -0.5f, -0.5f, 0.0f, 1.0f };
+	vertexData[0].texcoord = { 0.0f, 1.0f };
+	// 上
+	vertexData[1].position = { 0.0f, 0.5f, 0.0f, 1.0f };
+	vertexData[1].texcoord = { 0.5f, 0.0f };
+	// 右下
+	vertexData[2].position = { 0.5f, -0.5f, 0.0f, 1.0f };
+	vertexData[2].texcoord = { 1.0f, 1.0f };
+	// 左下2
+	vertexData[3].position = { -0.5f, -0.5f, 0.5f, 1.0f };
+	vertexData[3].texcoord = { 0.0f, 1.0f };
+	// 上2
+	vertexData[4].position = { 0.0f, 0.0f, 0.0f, 1.0f };
+	vertexData[4].texcoord = { 0.5f, 0.0f };
+	// 右下2
+	vertexData[5].position = { 0.5f, -0.5f, -0.5f, 1.0f };
+	vertexData[5].texcoord = { 1.0f, 1.0f };
 
 	// マテリアル用のリソース
 	ID3D12Resource* materialResource = CreateBufferResource(device, sizeof(Vector4));
@@ -475,9 +501,51 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	// 単位行列を書き込む
 	*wvpData = MakeIdentityMatrix4x4();
 
+	//===============================================
+	// vertexResourceSpriteの設定
+	//===============================================
+	ID3D12Resource* vertexResourceSprite = CreateBufferResource(device, sizeof(VertexData) * 6);
+
+	// VertexBufferrView
+	D3D12_VERTEX_BUFFER_VIEW vertexBufferViewSprite{};
+	vertexBufferViewSprite.BufferLocation = vertexResourceSprite->GetGPUVirtualAddress();
+	vertexBufferViewSprite.SizeInBytes = sizeof(VertexData) * 6;
+	vertexBufferViewSprite.StrideInBytes = sizeof(VertexData);
+
+	// 頂点データ
+	VertexData* vertexDataSprite = nullptr;
+	vertexResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&vertexDataSprite));
+	// 1枚目
+	// 左下
+	vertexDataSprite[0].position = { 0.0f, 360.0f, 0.0f, 1.0f };
+	vertexDataSprite[0].texcoord = { 0.0f, 1.0f };
+	// 左上
+	vertexDataSprite[1].position = { 0.0f, 0.0f, 0.0f, 1.0f };
+	vertexDataSprite[1].texcoord = { 0.0f, 0.0f };
+	// 右下
+	vertexDataSprite[2].position = { 640.0f, 360.0f, 0.0f, 1.0f };
+	vertexDataSprite[2].texcoord = { 1.0f, 1.0f };
+	// 2枚目
+	// 左上
+	vertexDataSprite[3].position = { 0.0f, 0.0f, 0.0f, 1.0f };
+	vertexDataSprite[3].texcoord = { 0.0f, 0.0f };
+	// 右上
+	vertexDataSprite[4].position = { 640.0f, 0.0f, 0.0f, 1.0f };
+	vertexDataSprite[4].texcoord = { 1.0f, 0.0f };
+	// 右下
+	vertexDataSprite[5].position = { 640.0f, 360.0f, 0.0f, 1.0f };
+	vertexDataSprite[5].texcoord = { 1.0f, 1.0f };
+
+	// sprite用TransformationMatrix用リソース
+	ID3D12Resource* transformationMatrixResourceSprite = CreateBufferResource(device, sizeof(Matrix4x4));
+	Matrix4x4* transformationMatrixDataSprite = nullptr;
+	transformationMatrixResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&transformationMatrixDataSprite));
+	*transformationMatrixDataSprite = MakeIdentityMatrix4x4();
+
 	// Transformの変数
 	Transform transfrom{ {1.0f, 1.0f, 1.0f},{0.0f, 0.0f, 0.0f},{0.0f, 0.0f,0.0f} };
 	Transform camaraTransform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -5.0f} };
+	Transform transformSprite{ {1.0f, 1.0f, 1.0f},{0.0f, 0.0f, 0.0f},{0.0f, 0.0f, 0.0f} };
 
 	// ビューポート
 	D3D12_VIEWPORT viewport{};
@@ -539,31 +607,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	// srvの作成
 	device->CreateShaderResourceView(textureResource, &srvDesc, textureSrvHandleCPU);
 
-	//===============================================
-	// 頂点データの更新
-	//===============================================
-	VertexData* vertexData = nullptr;
-	// アドレスを取得
-	vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
-	// 左下
-	vertexData[0].position = { -0.5f, -0.5f, 0.0f, 1.0f };
-	vertexData[0].texcoord = { 0.0f, 1.0f };
-	// 上
-	vertexData[1].position = { 0.0f, 0.5f, 0.0f, 1.0f };
-	vertexData[1].texcoord = { 0.5f, 0.0f };
-	// 右下
-	vertexData[2].position = { 0.5f, -0.5f, 0.0f, 1.0f };
-	vertexData[2].texcoord = { 1.0f, 1.0f };
-	// 左下2
-	vertexData[3].position = { -0.5f, -0.5f, 0.5f, 1.0f };
-	vertexData[3].texcoord = { 0.0f, 1.0f };
-	// 上2
-	vertexData[4].position = { 0.0f, 0.0f, 0.0f, 1.0f };
-	vertexData[4].texcoord = { 0.5f, 0.0f };
-	// 右下2
-	vertexData[5].position = { 0.5f, -0.5f, -0.5f, 1.0f };
-	vertexData[5].texcoord = { 1.0f, 1.0f };
-
 	// 出力ウィンドウへの文字出力
 	OutputDebugStringA("Hello DirectX!\n");
 
@@ -586,8 +629,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			ImGui_ImplDX12_NewFrame();
 			ImGui_ImplWin32_NewFrame();
 			ImGui::NewFrame();
-			ImGui::ShowDemoWindow();
+			ImGui::ShowDebugLogWindow();
 
+			//======================================
+			// WVPMatrix
+			//======================================
 			transfrom.rotate.y += 0.03f;
 			Matrix4x4 worldMatrix = MakeAffineMatrix(transfrom.scale, transfrom.rotate, transfrom.translate);
 			Matrix4x4 cameraMatrix = MakeAffineMatrix(camaraTransform.scale, camaraTransform.rotate, camaraTransform.translate);
@@ -595,6 +641,13 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			Matrix4x4 projectionMatrix = MakePerspectiveFovMatirx(0.45f, float(kClientWidth) / float(kClientHeight), 0.1f, 100.0f);
 			Matrix4x4 worldViewProjectionMatrix = Multiply(worldMatrix, Multiply(viewMatrix, projectionMatrix));
 			*wvpData = worldViewProjectionMatrix;
+
+			// sprite用
+			Matrix4x4 worldMatrixSprite = MakeAffineMatrix(transformSprite.scale, transformSprite.rotate, transformSprite.translate);
+			Matrix4x4 viewMatrixSprite = MakeIdentityMatrix4x4();
+			Matrix4x4 projectionMatrixSprite = MakeOrthographicMatrix(0.0f, 0.0f, float(kClientWidth), float(kClientHeight), 0.0f, 100.0f);
+			Matrix4x4 worldViewProjectionMatrixSprite = Multiply(worldMatrixSprite, Multiply(viewMatrixSprite, projectionMatrixSprite));
+			*transformationMatrixDataSprite = worldViewProjectionMatrixSprite;
 
 			// これから書き込むバックバッファのインデックスを取得
 			UINT backBufferIndex = swapChain->GetCurrentBackBufferIndex();
@@ -627,6 +680,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			ImGui::Render();
 
 			// DrawCall
+			// 3d
 			commandList->RSSetViewports(1, &viewport);
 			commandList->RSSetScissorRects(1, &scissorRect);
 			commandList->SetGraphicsRootSignature(rootSignature);
@@ -638,6 +692,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			commandList->SetGraphicsRootConstantBufferView(1, wvpResource->GetGPUVirtualAddress());
 			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
 			commandList->DrawInstanced(6, 1, 0, 0);
+			// 2d
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
+			commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResourceSprite->GetGPUVirtualAddress());
+			commandList->DrawInstanced(6, 1, 0, 0);
+			// imgui
 			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
 			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
 			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
@@ -709,6 +768,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	wvpResource->Release();
 	depthStencilResource->Release();
 	dsvDescriptorHeap->Release();
+	vertexResourceSprite->Release();
+	transformationMatrixResourceSprite->Release();
 	CloseWindow(hwnd);
 
 	// リソースチェック
@@ -1202,4 +1263,40 @@ ID3D12Resource* CreateDepthStencilTextureResource(ID3D12Device* device, int32_t 
 	);
 	assert(SUCCEEDED(hr));
 	return resource;
+}
+
+/// <summary>
+/// MakeOrthographicMatrix関数
+/// </summary>
+/// <param name="left">left</param>
+/// <param name="top">top</param>
+/// <param name="right">right</param>
+/// <param name="bottom">bottom</param>
+/// <param name="nearClip">nearClip</param>
+/// <param name="farClip">farClip</param>
+/// <returns>3次元正射影行列</returns>
+Matrix4x4 MakeOrthographicMatrix(float left, float top, float right, float bottom, float nearClip, float farClip) {
+	Matrix4x4 orthographicMatrix;
+
+	orthographicMatrix.m[0][0] = 2.0f / (right - left);
+	orthographicMatrix.m[0][1] = 0.0f;
+	orthographicMatrix.m[0][2] = 0.0f;
+	orthographicMatrix.m[0][3] = 0.0f;
+
+	orthographicMatrix.m[1][0] = 0.0f;
+	orthographicMatrix.m[1][1] = 2.0f / (top - bottom);
+	orthographicMatrix.m[1][2] = 0.0f;
+	orthographicMatrix.m[1][3] = 0.0f;
+
+	orthographicMatrix.m[2][0] = 0.0f;
+	orthographicMatrix.m[2][1] = 0.0f;
+	orthographicMatrix.m[2][2] = 1.0f / (farClip - nearClip);
+	orthographicMatrix.m[2][3] = 0.0f;
+
+	orthographicMatrix.m[3][0] = (left + right) / (left - right);
+	orthographicMatrix.m[3][1] = (top + bottom) / bottom - top;
+	orthographicMatrix.m[3][2] = (nearClip) / (nearClip - farClip);
+	orthographicMatrix.m[3][3] = 1.0f;
+
+	return orthographicMatrix;
 }
