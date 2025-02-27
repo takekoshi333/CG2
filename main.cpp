@@ -7,6 +7,8 @@
 #include <cassert>
 #include <dxgidebug.h>
 #include <dxcapi.h>
+#define _USE_MATH_DEFINES
+#include <math.h>
 #include "VertexData.h"
 #include "Vector4.h"
 #include "Matrix4x4.h"
@@ -449,14 +451,17 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	//===============================================
 	// vertexResourceを作成
 	//===============================================
-	ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(VertexData) * 6);
+	const uint32_t kSubdivision = 16;
+	const float kLonEvery = 180.0f * 2.0f / float(kSubdivision);
+	const float kLatEvery = 180.0f / float(kSubdivision);
+	ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(VertexData) * (kSubdivision * kSubdivision * 6));
 
 	// 頂点バッファビューを作成
 	D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
 	// リソースの先頭データから使う
 	vertexBufferView.BufferLocation = vertexResource->GetGPUVirtualAddress();
 	// 使用するリソースのサイズ
-	vertexBufferView.SizeInBytes = sizeof(VertexData) * 6;
+	vertexBufferView.SizeInBytes = sizeof(VertexData) * (kSubdivision * kSubdivision * 6);
 	// 1頂点当たりのサイズ
 	vertexBufferView.StrideInBytes = sizeof(VertexData);
 	
@@ -464,24 +469,62 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	VertexData* vertexData = nullptr;
 	// アドレスを取得
 	vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
-	// 左下
-	vertexData[0].position = { -0.5f, -0.5f, 0.0f, 1.0f };
-	vertexData[0].texcoord = { 0.0f, 1.0f };
-	// 上
-	vertexData[1].position = { 0.0f, 0.5f, 0.0f, 1.0f };
-	vertexData[1].texcoord = { 0.5f, 0.0f };
-	// 右下
-	vertexData[2].position = { 0.5f, -0.5f, 0.0f, 1.0f };
-	vertexData[2].texcoord = { 1.0f, 1.0f };
-	// 左下2
-	vertexData[3].position = { -0.5f, -0.5f, 0.5f, 1.0f };
-	vertexData[3].texcoord = { 0.0f, 1.0f };
-	// 上2
-	vertexData[4].position = { 0.0f, 0.0f, 0.0f, 1.0f };
-	vertexData[4].texcoord = { 0.5f, 0.0f };
-	// 右下2
-	vertexData[5].position = { 0.5f, -0.5f, -0.5f, 1.0f };
-	vertexData[5].texcoord = { 1.0f, 1.0f };
+
+	for (uint32_t latIndex = 0; latIndex < kSubdivision; ++latIndex) {
+		float lat = (latIndex * kLatEvery - 90.0f) * (float(M_PI) / 180.0f);
+		for (uint32_t lonIndex = 0; lonIndex < kSubdivision; ++lonIndex) {
+			uint32_t start = (latIndex * kSubdivision + lonIndex) * 6;
+			float lon = lonIndex * kLonEvery * (float(M_PI) / 180.0f);
+
+			// 頂点1
+			vertexData[start].position.x = cosf(lat) * cosf(lon);
+			vertexData[start].position.y = sinf(lat);
+			vertexData[start].position.z = cosf(lat) * sinf(lon);
+			vertexData[start].position.w = 1.0f;
+			vertexData[start].texcoord.x = float(lonIndex) / float(kSubdivision);
+			vertexData[start].texcoord.y = 1.0f - float(latIndex) / float(kSubdivision);
+
+			// 頂点2
+			vertexData[start + 1].position.x = cosf(lat + kLatEvery * (float(M_PI) / 180.0f)) * cosf(lon);
+			vertexData[start + 1].position.y = sinf(lat + kLatEvery * (float(M_PI) / 180.0f));
+			vertexData[start + 1].position.z = cosf(lat + kLatEvery * (float(M_PI) / 180.0f)) * sinf(lon);
+			vertexData[start + 1].position.w = 1.0f;
+			vertexData[start + 1].texcoord.x = float(lonIndex) / float(kSubdivision);
+			vertexData[start + 1].texcoord.y = 1.0f - float(latIndex + 1) / float(kSubdivision);
+
+			// 頂点3
+			vertexData[start + 2].position.x = cosf(lat) * cosf(lon + kLonEvery * (float(M_PI) / 180.0f));
+			vertexData[start + 2].position.y = sinf(lat);
+			vertexData[start + 2].position.z = cosf(lat) * sinf(lon + kLonEvery * (float(M_PI) / 180.0f));
+			vertexData[start + 2].position.w = 1.0f;
+			vertexData[start + 2].texcoord.x = float(lonIndex + 1) / float(kSubdivision);
+			vertexData[start + 2].texcoord.y = 1.0f - float(latIndex) / float(kSubdivision);
+
+			// 頂点4
+			vertexData[start + 3].position.x = cosf(lat + kLatEvery * (float(M_PI) / 180.0f)) * cosf(lon);
+			vertexData[start + 3].position.y = sinf(lat + kLatEvery * (float(M_PI) / 180.0f));
+			vertexData[start + 3].position.z = cosf(lat + kLatEvery * (float(M_PI) / 180.0f)) * sinf(lon);
+			vertexData[start + 3].position.w = 1.0f;
+			vertexData[start + 3].texcoord.x = float(lonIndex) / float(kSubdivision);
+			vertexData[start + 3].texcoord.y = 1.0f - float(latIndex + 1) / float(kSubdivision);
+
+			// 頂点5
+			vertexData[start + 4].position.x = cosf(lat + kLatEvery * (float(M_PI) / 180.0f)) * cosf(lon + kLonEvery * (float(M_PI) / 180.0f));
+			vertexData[start + 4].position.y = sinf(lat + kLatEvery * (float(M_PI) / 180.0f));
+			vertexData[start + 4].position.z = cosf(lat + kLatEvery * (float(M_PI) / 180.0f)) * sinf(lon + kLonEvery * (float(M_PI) / 180.0f));
+			vertexData[start + 4].position.w = 1.0f;
+			vertexData[start + 4].texcoord.x = float(lonIndex + 1) / float(kSubdivision);
+			vertexData[start + 4].texcoord.y = 1.0f - float(latIndex + 1) / float(kSubdivision);
+
+			// 頂点6
+			vertexData[start + 5].position.x = cosf(lat) * cosf(lon + kLonEvery * (float(M_PI) / 180.0f));
+			vertexData[start + 5].position.y = sinf(lat);
+			vertexData[start + 5].position.z = cosf(lat) * sinf(lon + kLonEvery * (float(M_PI) / 180.0f));
+			vertexData[start + 5].position.w = 1.0f;
+			vertexData[start + 5].texcoord.x = float(lonIndex + 1) / float(kSubdivision);
+			vertexData[start + 5].texcoord.y = 1.0f - float(latIndex) / float(kSubdivision);
+		}
+	}
 
 	// マテリアル用のリソース
 	ID3D12Resource* materialResource = CreateBufferResource(device, sizeof(Vector4));
@@ -629,7 +672,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			ImGui_ImplDX12_NewFrame();
 			ImGui_ImplWin32_NewFrame();
 			ImGui::NewFrame();
-			ImGui::ShowDebugLogWindow();
+			ImGui::Begin("window");
+			ImGui::DragFloat3("CameraTranslate.translate", &camaraTransform.translate.x, 0.01f);
+			ImGui::DragFloat3("CameraTranslate.rotate", &camaraTransform.rotate.x, 0.01f);
+			ImGui::End();
 
 			//======================================
 			// WVPMatrix
@@ -691,7 +737,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress());
 			commandList->SetGraphicsRootConstantBufferView(1, wvpResource->GetGPUVirtualAddress());
 			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
-			commandList->DrawInstanced(6, 1, 0, 0);
+			commandList->DrawInstanced(kSubdivision * kSubdivision * 6, 1, 0, 0);
 			// 2d
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
 			commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResourceSprite->GetGPUVirtualAddress());
