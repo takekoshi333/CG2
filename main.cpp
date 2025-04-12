@@ -9,6 +9,10 @@
 #include <dxcapi.h>
 #define _USE_MATH_DEFINES
 #include <math.h>
+#include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <chrono>
 #include "VertexData.h"
 #include "Vector4.h"
 #include "Matrix4x4.h"
@@ -30,9 +34,8 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg
 std::wstring ConvertString(const std::string& str);
 std::string ConvertString(const std::wstring& std);
 
-void Log(const std::string& message) {
-	OutputDebugStringA(message.c_str());
-}
+void Log(const std::string& message);
+void Log(std::ostream& os, const std::string& message);
 
 IDxcBlob* CompileShader(
 	const std::wstring& filePath,
@@ -79,9 +82,36 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 // Windousアプリでのエントリーポイント(main関数)
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
+	//===============================================
+	// ログの初期化
+	//===============================================
+	// ログのディレクトリを用意
+	std::filesystem::create_directory("Logs");
+	// 現在時刻を取得(UTC)
+	std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
+	std::chrono::time_point<std::chrono::system_clock, std::chrono::seconds> nowSeconds =
+		std::chrono::time_point_cast<std::chrono::seconds>(now);
+	// 日本時間に変換
+	std::chrono::zoned_time localTime{ std::chrono::current_zone(), nowSeconds };
+	// formatで年月日_時分秒に変換
+	std::string dataString = std::format("{:%Y%m%d_%H%M%S}", localTime);
+	// 時刻を使ってファイル名を決定
+	std::string logFilePath = std::string("logs/") + dataString + ".log";
+	// ファイルを作って書き込み準備
+	std::ofstream logStream(logFilePath);
+
+	Log(logStream, "ログの初期化完了");
+
+	//===============================================
 	// COMの初期化
+	//===============================================
 	CoInitializeEx(0, COINIT_MULTITHREADED);
 
+	Log(logStream, "COMの初期化完了");
+
+	//===============================================
+	// ウィンドウクラスを登録
+	//===============================================
 	WNDCLASS wc{};
 	// ウィンドウプロシージャ
 	wc.lpfnWndProc = WindowProc;
@@ -116,6 +146,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	}
 #endif
 
+	Log(logStream, "ウィンドウを生成");
+
 	// ウィンドウの生成
 	HWND hwnd = CreateWindow(
 		wc.lpszClassName,
@@ -131,10 +163,19 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 		nullptr
 	);
 
+	//===============================================
 	// DXGIファクトリーの生成
+	//===============================================
+	Log(logStream, "DXGIファクトリーの生成");
+
 	IDXGIFactory7* dxgiFactory = nullptr;
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&dxgiFactory));
 	assert(SUCCEEDED(hr));
+
+	//===============================================
+	// 使用するアダプターを取得
+	//===============================================
+	Log(logStream, "使用するアダプターを取得開始");
 
 	// 使用するアダプターの変数
 	IDXGIAdapter4* useAdapter = nullptr;
@@ -184,6 +225,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	assert(device != nullptr);
 	// 初期化完了ログを出力
 	Log("Complete creat D3D12Device!!!\n");
+	Log(logStream, "使用するアダプターを取得完了");
 
 	// エラー、警告の際の停止
 #ifdef _DEBUG
@@ -215,6 +257,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	}
 #endif 
 
+	//===============================================
+	// コマンドキューの生成
+	//===============================================
+	Log(logStream, "コマンドキューを生成");
+
 	// コマンドキューを生成する
 	ID3D12CommandQueue* commandQueue = nullptr;
 	D3D12_COMMAND_QUEUE_DESC commandQueueDesc{};
@@ -222,17 +269,32 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	// コマンドキューの生成がうまくいかなかった場合
 	assert(SUCCEEDED(hr));
 
+	//===============================================
+	// コマンドアロケータの生成
+	//===============================================
+	Log(logStream, "コマンドアロケータを生成");
+
 	// コマンドアロケータを生成する
 	ID3D12CommandAllocator* commandAllocator = nullptr;
 	hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator));
 	// コマンドアロケータの生成がうまくいかなかった場合
 	assert(SUCCEEDED(hr));
 
+	//===============================================
+	// コマンドリストの生成
+	//===============================================
+	Log(logStream, "コマンドリストを生成");
+
 	// コマンドリストを生成する
 	ID3D12GraphicsCommandList* commandList = nullptr;
 	hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator, nullptr, IID_PPV_ARGS(&commandList));
 	// コマンドリストの生成がうまくいかなかった場合
 	assert(SUCCEEDED(hr));
+
+	//===============================================
+	// スワップチェーンの生成
+	//===============================================
+	Log(logStream, "スワップチェーンを生成");
 
 	// スワップチェーンを生成する
 	IDXGISwapChain4* swapChain = nullptr;
@@ -247,6 +309,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	// コマンドキュー、ウィンドウハンドル、設定を渡して生成する
 	hr = dxgiFactory->CreateSwapChainForHwnd(commandQueue, hwnd, &swapChainDesc, nullptr, nullptr, reinterpret_cast<IDXGISwapChain1**>(&swapChain));
 	assert(SUCCEEDED(hr));
+
+	//===============================================
+	// ディスクリプタヒープの生成
+	//===============================================
+	Log(logStream, "ディスクリプタヒープの生成");
 
 	// ディスクリプタヒープの生成
 	ID3D12DescriptorHeap* rtvDescriptorHeap = CreateDescriptorHeap(device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 2, false);
@@ -265,6 +332,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	const uint32_t descriptorSizeRTV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 	const uint32_t descriptorSizeDSV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
 
+	//===============================================
+	// RTVを設定
+	//===============================================
+	Log(logStream, "RTVを設定");
+
 	// RTVの設定
 	D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{};
 	rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
@@ -276,15 +348,30 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	rtvHandles[1] = GetCPUDescriptorHandle(rtvDescriptorHeap, descriptorSizeRTV, 1);  // インデックス1で取得
 	device->CreateRenderTargetView(swapChainResources[1], &rtvDesc, rtvHandles[1]);
 
+	//===============================================
+	// Fenceを設定
+	//===============================================
+	Log(logStream, "Fenceを設定");
+
 	// Fence
 	ID3D12Fence* fence = nullptr;
 	uint64_t fenceValue = 0;
 	hr = device->CreateFence(fenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
 	assert(SUCCEEDED(hr));
 
+	//===============================================
+	// Eventを設定
+	//===============================================
+	Log(logStream, "Eventを設定");
+
 	// Event
 	HANDLE fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 	assert(fenceEvent != nullptr);
+
+	//===============================================
+	// dxcCompilerを初期化
+	//===============================================
+	Log(logStream, "dxcCompilerを初期化");
 
 	// dxcCompilerを初期化
 	IDxcUtils* dxcUtils = nullptr;
@@ -294,10 +381,20 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	hr = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxcCompiler));
 	assert(SUCCEEDED(hr));
 
+	//===============================================
+	// includeの設定
+	//===============================================
+	Log(logStream, "includeの設定");
+
 	// includeの設定
 	IDxcIncludeHandler* includeHandler = nullptr;
 	hr = dxcUtils->CreateDefaultIncludeHandler(&includeHandler);
 	assert(SUCCEEDED(hr));
+
+	//===============================================
+	// RootSignatureの生成
+	//===============================================
+	Log(logStream, "RootSignatureの生成");
 
 	// RootSignatureの生成
 	D3D12_ROOT_SIGNATURE_DESC descriptionRootSignature{};
@@ -306,6 +403,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	//===============================================
 	// descriptorRangeの設定
 	//===============================================
+	Log(logStream, "descriptorRangeを設定");
 	D3D12_DESCRIPTOR_RANGE descriptorRange[1] = {};
 	descriptorRange[0].BaseShaderRegister = 0;
 	descriptorRange[0].NumDescriptors = 1;
@@ -333,6 +431,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	//===============================================
 	// samplerの設定
 	//===============================================
+	Log(logStream, "samplerを設定");
 	D3D12_STATIC_SAMPLER_DESC staticSampler[1] = {};
 	staticSampler[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
 	staticSampler[0].AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -411,11 +510,13 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	//===============================================
 	// depthStencilResource生成
 	//===============================================
+	Log(logStream, "depthStencilResource生成");
 	ID3D12Resource* depthStencilResource = CreateDepthStencilTextureResource(device, kClientWidth, kClientHeight);
 
 	//===============================================
 	// dsvDescriptorHeap生成
 	//===============================================
+	Log(logStream, "dsvDescriptorHeap生成");
 	ID3D12DescriptorHeap* dsvDescriptorHeap = CreateDescriptorHeap(device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1, false);
 
 	// dsv設定
@@ -428,6 +529,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	//===============================================
 	// depthStencilStateの設定
 	//===============================================
+	Log(logStream, "depthStencilStateを設定");
 	D3D12_DEPTH_STENCIL_DESC depthStencilDesc{};
 	depthStencilDesc.DepthEnable = true;
 	depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
@@ -466,6 +568,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	//===============================================
 	// vertexResourceを作成
 	//===============================================
+	Log(logStream, "vertexResourceを作成");
 	const uint32_t kSubdivision = 16;
 	const float kLonEvery = 180.0f * 2.0f / float(kSubdivision);
 	const float kLatEvery = 180.0f / float(kSubdivision);
@@ -569,6 +672,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	materialData->color = { 1.0f, 1.0f, 1.0f, 1.0f };
 	// lighting
 	materialData->enableLighting = true;
+	// lightingの切り替え
+	bool isEnableLighting = true;
 
 	// Sprite用のマテリアルリソース
 	ID3D12Resource* materialResourceSprite = CreateBufferResource(device, sizeof(Material));
@@ -595,6 +700,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	//===============================================
 	// vertexResourceSpriteの設定
 	//===============================================
+	Log(logStream, "vertexResourceSpriteを設定");
 	ID3D12Resource* vertexResourceSprite = CreateBufferResource(device, sizeof(VertexData) * 6);
 
 	// VertexBufferrView
@@ -679,6 +785,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	//===============================================
 	// ImGuiの初期化
 	//===============================================
+	Log(logStream, "ImGuiを初期化");
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGui::StyleColorsDark();
@@ -695,6 +802,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	//===============================================
 	// Textureを読んで転送
 	//===============================================
+	Log(logStream, "Textureを読んで転送");
 	// uvChecker
 	DirectX::ScratchImage mipImages = LoadTexture("resources/uvChecker.png");
 	const DirectX::TexMetadata& metadata = mipImages.GetMetadata();
@@ -713,6 +821,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	//===============================================
 	// ShaderResourceViewの作成
 	//===============================================
+	Log(logStream, "ShaderResourceViewを作成");
 	// srvの設定
 	// uvChacker
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
@@ -745,8 +854,13 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	// srvの切り替え
 	bool useMonsterBall = true;
 
+	//===============================================
+	//  ウィンドウを表示
+	//===============================================
 	// 出力ウィンドウへの文字出力
 	OutputDebugStringA("Hello DirectX!\n");
+
+	Log(logStream, "ウィンドウを表示開始");
 
 	// ウィンドウを表示
 	ShowWindow(hwnd, SW_SHOW);
@@ -771,10 +885,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			ImGui::DragFloat3("CameraTranslate.translate", &camaraTransform.translate.x, 0.01f);
 			ImGui::DragFloat3("CameraTranslate.rotate", &camaraTransform.rotate.x, 0.01f);
 			ImGui::DragFloat3("directionLight.direction", &directionalLightData->direction.x);
+			ImGui::DragFloat3("resourceSprite.translate", &transformSprite.translate.x);
 			ImGui::DragFloat("directionLight.intensity", &directionalLightData->intensity);
 			ImGui::Checkbox("useMonsterBall", &useMonsterBall);
 			ImGui::Checkbox("isDrawSprite", &isDrawSprite);
-			ImGui::DragInt("enableLighting", &materialData->enableLighting);
+			ImGui::Checkbox("enableLighting", &isEnableLighting);
 			ImGui::End();
 
 			//======================================
@@ -838,16 +953,20 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResource->GetGPUVirtualAddress());
 			commandList->SetGraphicsRootDescriptorTable(2, useMonsterBall ? textureSrvHandleGPU2 : textureSrvHandleGPU);
 			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
+			// lightingの有効化
+			if (isEnableLighting) {
+				materialData->enableLighting = true;
+			} else {
+				materialData->enableLighting = false;
+			}
 			commandList->DrawInstanced(kSubdivision * kSubdivision * 6, 1, 0, 0);
 			// 2d
-			
 			commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress());
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
 			commandList->IASetIndexBuffer(&indexBufferViewSprite);
 			commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResourceSprite->GetGPUVirtualAddress());
 			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
 			if (isDrawSprite) {
-				/*commandList->DrawInstanced(6, 1, 0, 0);*/
 				commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
 			}
 			// imgui
@@ -942,6 +1061,39 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	return 0;
 }
 
+/// <summary>
+/// デバッグ出力にメッセージを出力
+/// </summary>
+/// <param name="message">出力するログメッセージ</param>
+void Log(const std::string& message) {
+	OutputDebugStringA(message.c_str());
+}
+
+/// <summary>
+/// 指定したストリームに時刻付きのログメッセージを出力
+/// </summary>
+/// <param name="os">出力先のストリーム</param>
+/// <param name="message">出力するログメッセージ</param>
+void Log(std::ostream& os, const std::string& message) {
+	// 現在時刻を取得（日本時間）
+	std::chrono::time_point<std::chrono::system_clock, std::chrono::system_clock::duration> now = std::chrono::system_clock::now();
+	std::chrono::zoned_time<std::chrono::system_clock::duration> localTime{ std::chrono::current_zone(), now };
+
+	// 時刻を文字列にフォーマット
+	std::string timeString = std::format("[{:%Y-%m-%d %H:%M:%S}] ", localTime);
+
+	// 出力
+	os << timeString << message << std::endl;
+
+	// デバッグ出力にも（時刻付きで）
+	OutputDebugStringA((timeString + message + "\n").c_str());
+}
+
+/// <summary>
+/// UTF-8文字列をUTF-16に変換
+/// </summary>
+/// <param name="str">変換対象</param>
+/// <returns>変換後</returns>
 std::wstring ConvertString(const std::string& str) {
 	if (str.empty()) {
 		return std::wstring();
@@ -956,6 +1108,11 @@ std::wstring ConvertString(const std::string& str) {
 	return result;
 }
 
+/// <summary>
+/// UTF-16文字列をUTF-8に変換
+/// </summary>
+/// <param name="str">変換対象</param>
+/// <returns>変換後</returns>
 std::string ConvertString(const std::wstring& str) {
 	if (str.empty()) {
 		return std::string();
