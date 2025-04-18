@@ -52,7 +52,10 @@ D3D12_CPU_DESCRIPTOR_HANDLE GetCPUDescriptorHandle(ID3D12DescriptorHeap* descrip
 D3D12_GPU_DESCRIPTOR_HANDLE GetGPUDescriptorHandle(ID3D12DescriptorHeap* descriptorHeap, uint32_t descriptorSize, uint32_t index);
 
 Matrix4x4 MakeIdentityMatrix4x4();
+Matrix4x4 MakeScaleMatrix(Vector3 scale);
 Matrix4x4 MakeAffineMatrix(Vector3 scale, Vector3 theta, Vector3 translate);
+Matrix4x4 MakeRotateZMatrix(float rotateZ);
+Matrix4x4 MakeTranslateMatrix(Vector3 translate);
 Matrix4x4 Multiply(Matrix4x4 matrix1, Matrix4x4 matrix2);
 Matrix4x4 MakePerspectiveFovMatirx(float fovY, float aspectRaito, float nearClip, float farClip);
 Matrix4x4 Inverse(Matrix4x4 matrix);
@@ -668,6 +671,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	Material* materialData = nullptr;
 	// 書き込むアドレスを取得
 	materialResource->Map(0, nullptr, reinterpret_cast<void**>(&materialData));
+	// 単位行列で初期化
+	materialData->uvTransform = MakeIdentityMatrix4x4();
 	// 白色を書き込む
 	materialData->color = { 1.0f, 1.0f, 1.0f, 1.0f };
 	// lighting
@@ -679,6 +684,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	ID3D12Resource* materialResourceSprite = CreateBufferResource(device, sizeof(Material));
 	Material* materialDataSprite = nullptr;
 	materialResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&materialDataSprite));
+	materialDataSprite->uvTransform = MakeIdentityMatrix4x4();
 	materialDataSprite->color = { 1.0f, 1.0f, 1.0f, 1.0f };
 	materialDataSprite->enableLighting = false;
 
@@ -765,6 +771,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	Transform transfrom{ {1.0f, 1.0f, 1.0f},{0.0f, 0.0f, 0.0f},{0.0f, 0.0f,0.0f} };
 	Transform camaraTransform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -5.0f} };
 	Transform transformSprite{ {1.0f, 1.0f, 1.0f},{0.0f, 0.0f, 0.0f},{0.0f, 0.0f, 0.0f} };
+	Transform uvTransformSprite = {
+		{1.0f, 1.0f, 1.0f},
+		{0.0f, 0.0f, 0.0f},
+		{0.0f, 0.0f, 0.0f}
+	};
 
 	// ビューポート
 	D3D12_VIEWPORT viewport{};
@@ -881,20 +892,37 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			ImGui_ImplDX12_NewFrame();
 			ImGui_ImplWin32_NewFrame();
 			ImGui::NewFrame();
-			ImGui::Begin("window");
-			ImGui::DragFloat3("CameraTranslate.translate", &camaraTransform.translate.x, 0.01f);
-			ImGui::DragFloat3("CameraTranslate.rotate", &camaraTransform.rotate.x, 0.01f);
-			ImGui::DragFloat3("directionLight.direction", &directionalLightData->direction.x);
-			ImGui::DragFloat3("resourceSprite.translate", &transformSprite.translate.x);
-			ImGui::DragFloat("directionLight.intensity", &directionalLightData->intensity);
-			ImGui::Checkbox("useMonsterBall", &useMonsterBall);
-			ImGui::Checkbox("isDrawSprite", &isDrawSprite);
-			ImGui::Checkbox("enableLighting", &isEnableLighting);
+			ImGui::Begin("Setting");
+			if (ImGui::TreeNode("Camera Setting")) {
+				ImGui::DragFloat3("CameraTranslate.translate", &camaraTransform.translate.x, 0.01f);
+				ImGui::DragFloat3("CameraTranslate.rotate", &camaraTransform.rotate.x, 0.01f);
+				ImGui::TreePop();
+			}
+
+			if (ImGui::TreeNode("Material Setting")) {
+				ImGui::DragFloat3("directionLight.direction", &directionalLightData->direction.x);
+				ImGui::DragFloat("directionLight.intensity", &directionalLightData->intensity);
+				ImGui::SliderFloat4("material.color", &materialData->color.x, 0.0f, 1.0f);
+				ImGui::Checkbox("useMonsterBall", &useMonsterBall);
+				ImGui::Checkbox("enableLighting", &isEnableLighting);
+				ImGui::TreePop();
+			}
+
+			if (ImGui::TreeNode("Sprite Setting")) {
+				ImGui::DragFloat3("resourceSprite.translate", &transformSprite.translate.x);
+				ImGui::DragFloat2("UVTranslate", &uvTransformSprite.translate.x, 0.01f, -10.0f, 10.0f);
+				ImGui::DragFloat2("UVScale", &uvTransformSprite.scale.x, 0.0f, -10.0f, 10.0f);
+				ImGui::SliderAngle("UVRotate", &uvTransformSprite.rotate.z);
+				ImGui::Checkbox("isDrawSprite", &isDrawSprite);
+				ImGui::TreePop();
+			}
+
 			ImGui::End();
 
 			//======================================
 			// WVPMatrix
 			//======================================
+			// material用
 			transfrom.rotate.y += 0.03f;
 			Matrix4x4 worldMatrix = MakeAffineMatrix(transfrom.scale, transfrom.rotate, transfrom.translate);
 			Matrix4x4 cameraMatrix = MakeAffineMatrix(camaraTransform.scale, camaraTransform.rotate, camaraTransform.translate);
@@ -909,6 +937,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			Matrix4x4 projectionMatrixSprite = MakeOrthographicMatrix(0.0f, 0.0f, float(kClientWidth), float(kClientHeight), 0.0f, 100.0f);
 			Matrix4x4 worldViewProjectionMatrixSprite = Multiply(worldMatrixSprite, Multiply(viewMatrixSprite, projectionMatrixSprite));
 			transformationMatrixDataSprite->WVP = worldViewProjectionMatrixSprite;
+
+			// UVTransform用
+			Matrix4x4 uvTransformMatrix = MakeScaleMatrix(uvTransformSprite.scale);
+			uvTransformMatrix = Multiply(uvTransformMatrix, MakeRotateZMatrix(uvTransformSprite.rotate.z));
+			uvTransformMatrix = Multiply(uvTransformMatrix, MakeTranslateMatrix(uvTransformSprite.translate));
+			materialDataSprite->uvTransform = uvTransformMatrix;
 
 			// これから書き込むバックバッファのインデックスを取得
 			UINT backBufferIndex = swapChain->GetCurrentBackBufferIndex();
@@ -1260,6 +1294,55 @@ Matrix4x4 MakeIdentityMatrix4x4() {
 }
 
 /// <summary>
+/// 4x4の拡縮行列を作成
+/// </summary>
+/// <param name="scale">scaleの変数</param>
+/// <returns>4x4の拡縮行列</returns>
+Matrix4x4 MakeScaleMatrix(Vector3 scale) {
+	Matrix4x4 scaleMatirx;
+
+	scaleMatirx.m[0][0] = scale.x;
+	scaleMatirx.m[0][1] = 0.0f;
+	scaleMatirx.m[0][2] = 0.0f;
+	scaleMatirx.m[0][3] = 0.0f;
+
+	scaleMatirx.m[1][0] = 0.0f;
+	scaleMatirx.m[1][1] = scale.y;
+	scaleMatirx.m[1][2] = 0.0f;
+	scaleMatirx.m[1][3] = 0.0f;
+
+	scaleMatirx.m[2][0] = 0.0f;
+	scaleMatirx.m[2][1] = 0.0f;
+	scaleMatirx.m[2][2] = scale.z;
+	scaleMatirx.m[2][3] = 0.0f;
+
+	scaleMatirx.m[3][0] = 0.0f;
+	scaleMatirx.m[3][1] = 0.0f;
+	scaleMatirx.m[3][2] = 0.0f;
+	scaleMatirx.m[3][3] = 1.0f;
+
+	return scaleMatirx;
+}
+
+/// <summary>
+/// z軸の回転行列を作成
+/// </summary>
+/// <param name="rotateZ">rotateZの変数</param>
+/// <returns>z軸の回転行列</returns>
+Matrix4x4 MakeRotateZMatrix(float rotateZ) {
+	Matrix4x4 rotateZMatrix;
+
+	rotateZMatrix = {
+		cosf(rotateZ), sinf(rotateZ), 0.0f, 0.0f,
+		-sinf(rotateZ), cosf(rotateZ), 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		0.0f, 0.0f, 0.0f, 1.0f
+	};
+
+	return rotateZMatrix;
+}
+
+/// <summary>
 /// MakeAffineMatrix関数
 /// </summary>
 /// <param name="scale">拡縮</param>
@@ -1323,6 +1406,24 @@ Matrix4x4 MakeAffineMatrix(Vector3 scale, Vector3 rotate, Vector3 translate) {
 	affineMatrix = Multiply(translateMatrix, Multiply(scaleMatrix, rotationMatrix));
 
 	return affineMatrix;
+}
+
+/// <summary>
+/// 平行移動行列の作成
+/// </summary>
+/// <param name="translate"></param>
+/// <returns></returns>
+Matrix4x4 MakeTranslateMatrix(Vector3 translate) {
+	Matrix4x4 translateMatrix;
+
+	translateMatrix = {
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		translate.x, translate.y, translate.z, 1.0f
+	};
+
+	return translateMatrix;
 }
 
 /// <summary>
